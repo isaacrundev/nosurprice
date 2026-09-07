@@ -21,6 +21,7 @@ import { persistPhoto } from '@/utils/photoStorage';
 import { confirmDestructive, showAlert } from '@/utils/dialog';
 import { ocrPrice } from '@/utils/ocr';
 import { PhotoGrid } from '@/components/PhotoGrid';
+import { PhotoViewer } from '@/components/PhotoViewer';
 
 type FormValues = {
   name: string;
@@ -50,6 +51,8 @@ export default function ItemNewScreen() {
   // 正在挑 / 儲存中的 section;null 表示閒置。驅動 PhotoGrid 顯示 spinner
   const [pickingFor, setPickingFor] = useState<Target | null>(null);
   const [isOcring, setIsOcring] = useState(false);
+  // 點縮圖 → 全螢幕檢視;null = 關閉
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
 
   const handleCapture = useCallback(async (target: Target) => {
     // 開 picker 不用 spinner(同步動作);spinner 只覆蓋 persistPhoto 那段
@@ -139,6 +142,7 @@ export default function ItemNewScreen() {
   if (step === 'label') {
     return (
       <SafeAreaView style={styles.container}>
+        <PhotoViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
         <Stack.Screen options={{ title: '新增商品' }} />
         <View style={styles.stepIntro}>
           <Text style={styles.stepKicker}>第 1 步 / 共 2 步</Text>
@@ -152,6 +156,7 @@ export default function ItemNewScreen() {
             photos={labelPhotos}
             onAdd={() => handleCapture('label')}
             onRemove={(idx) => handleRemove('label', idx)}
+            onPress={setViewerUri}
             loading={pickingFor === 'label'}
           />
         </View>
@@ -175,6 +180,7 @@ export default function ItemNewScreen() {
   // 第 2 步:填寫表單(沿用既有 layout)。
   return (
     <SafeAreaView style={styles.container}>
+      <PhotoViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
       <Stack.Screen options={{ title: '新增商品' }} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -264,6 +270,7 @@ export default function ItemNewScreen() {
               photos={labelPhotos}
               onAdd={() => handleCapture('label')}
               onRemove={(idx) => handleRemove('label', idx)}
+              onPress={setViewerUri}
               loading={pickingFor === 'label'}
             />
           </View>
@@ -274,6 +281,7 @@ export default function ItemNewScreen() {
               photos={extraPhotos}
               onAdd={() => handleCapture('extra')}
               onRemove={(idx) => handleRemove('extra', idx)}
+              onPress={setViewerUri}
               loading={pickingFor === 'extra'}
             />
           </View>

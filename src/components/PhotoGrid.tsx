@@ -11,17 +11,31 @@ type Props = {
   photos: string[];
   onAdd: () => void;
   onRemove: (idx: number) => void;
+  // 點縮圖本身(不是 × 鈕)叫出全螢幕檢視;省略 = 不啟用。
+  // 跟 onRemove 分開: × 釺是刪除(危險動作),點照片是查看(常見動作),不能撞。
+  onPress?: (uri: string) => void;
   loading?: boolean;
 };
 
 // 80x80 縮圖網格 + 右下紅 × 刪除 + 虛線藍框 ＋ 新增
 // loading=true 時「＋」變 spinner + disabled,讓使用者知道正在處理
-export function PhotoGrid({ photos, onAdd, onRemove, loading }: Props) {
+export function PhotoGrid({ photos, onAdd, onRemove, onPress, loading }: Props) {
   return (
     <View style={styles.grid}>
       {photos.map((uri, idx) => (
         <View key={uri} style={styles.thumbWrap}>
-          <Image source={{ uri }} style={styles.thumb} />
+          {onPress ? (
+            <Pressable
+              onPress={() => onPress(uri)}
+              accessibilityLabel="檢視照片"
+              accessibilityHint="點擊放大查看"
+              style={({ pressed }) => [styles.thumbPressable, pressed && styles.thumbPressed]}
+            >
+              <Image source={{ uri }} style={styles.thumb} />
+            </Pressable>
+          ) : (
+            <Image source={{ uri }} style={styles.thumb} />
+          )}
           <Pressable
             onPress={() => onRemove(idx)}
             hitSlop={6}
@@ -56,6 +70,8 @@ export function PhotoGrid({ photos, onAdd, onRemove, loading }: Props) {
 const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   thumbWrap: { position: 'relative', width: 80, height: 80 },
+  thumbPressable: { width: 80, height: 80, borderRadius: 6, overflow: 'hidden' },
+  thumbPressed: { opacity: 0.6 },
   thumb: { width: 80, height: 80, borderRadius: 6, backgroundColor: '#eee' },
   thumbX: {
     position: 'absolute',

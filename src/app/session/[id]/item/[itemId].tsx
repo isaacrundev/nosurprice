@@ -22,6 +22,7 @@ import { persistPhoto } from '@/utils/photoStorage';
 import { confirmDestructive, showAlert } from '@/utils/dialog';
 import { ocrPrice } from '@/utils/ocr';
 import { PhotoGrid } from '@/components/PhotoGrid';
+import { PhotoViewer } from '@/components/PhotoViewer';
 
 type FormValues = {
   name: string;
@@ -60,6 +61,8 @@ export default function ItemDetailScreen() {
   // 正在挑 / 儲存中的 section;null 表示閒置。驅動 PhotoGrid 顯示 spinner
   const [pickingFor, setPickingFor] = useState<Target | null>(null);
   const [isOcring, setIsOcring] = useState(false);
+  // 點縮圖 / header 大圖 → 全螢幕檢視
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
 
   // 同步 store 的 item 進來(進到不同 itemId 時觸發)
   useEffect(() => {
@@ -180,6 +183,7 @@ export default function ItemDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <PhotoViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
       <Stack.Screen options={{ title: item.name }} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -187,11 +191,16 @@ export default function ItemDetailScreen() {
       >
         <ScrollView contentContainerStyle={styles.content}>
           {item.labelPhotos[0] && (
-            <Image
-              source={{ uri: item.labelPhotos[0] }}
-              style={styles.bigPhoto}
-              resizeMode="cover"
-            />
+            <Pressable
+              onPress={() => setViewerUri(item.labelPhotos[0])}
+              style={({ pressed }) => [pressed && styles.bigPhotoPressed]}
+            >
+              <Image
+                source={{ uri: item.labelPhotos[0] }}
+                style={styles.bigPhoto}
+                resizeMode="cover"
+              />
+            </Pressable>
           )}
 
           <Field label="商品名稱" required>
@@ -277,6 +286,7 @@ export default function ItemDetailScreen() {
               photos={labelPhotos}
               onAdd={() => handleCapture('label')}
               onRemove={(idx) => handleRemove('label', idx)}
+              onPress={setViewerUri}
               loading={pickingFor === 'label'}
             />
           </View>
@@ -287,6 +297,7 @@ export default function ItemDetailScreen() {
               photos={extraPhotos}
               onAdd={() => handleCapture('extra')}
               onRemove={(idx) => handleRemove('extra', idx)}
+              onPress={setViewerUri}
               loading={pickingFor === 'extra'}
             />
           </View>
@@ -352,6 +363,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#eee',
   },
+  bigPhotoPressed: { opacity: 0.7 },
   field: { gap: 6 },
   label: { fontSize: 13, color: '#444', fontWeight: '500' },
   required: { color: '#c00' },

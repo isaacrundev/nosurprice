@@ -1,5 +1,7 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent } from '@testing-library/react-native';
+
+import { renderWithProviders } from '@/test-utils/render';
 
 const mockAddItem = jest.fn();
 const mockPick = jest.fn();
@@ -46,7 +48,7 @@ describe('ItemNew — 兩步驟流程', () => {
   });
 
   it('預設顯示第一步上傳標籤照,沒標籤時不顯示「下一步」按鈕、表單不渲染', async () => {
-    const { getByText, queryByText } = await render(<ItemNewScreen />);
+    const { getByText, queryByText } = await renderWithProviders(<ItemNewScreen />);
 
     // step 1 的提示文案
     expect(getByText('先拍標籤照')).toBeTruthy();
@@ -63,7 +65,7 @@ describe('ItemNew — 兩步驟流程', () => {
     mockPick.mockResolvedValue('content://picker/photo');
     mockPersist.mockResolvedValue('file:///photos/persisted.jpg');
 
-    const { getByText, queryByText } = await render(<ItemNewScreen />);
+    const { getByText, queryByText } = await renderWithProviders(<ItemNewScreen />);
 
     // 上傳前沒有「下一步」
     expect(queryByText('下一步')).toBeNull();

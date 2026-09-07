@@ -2,6 +2,25 @@ form is meaningless (OCR target, dispute evidence, etc.).
 
 ## Decisions log
 
+- **2025-09-07 — 點標籤照縮圖全螢幕檢視。** `PhotoGrid` 原本點縮圖什麼都不會發生
+  (只有 × 釺能按),結帳台場景下使用者需要親眼再確認標籤照上的價格。
+  加:<br>
+  1. `PhotoGrid` 新增選用 `onPress?: (uri: string) => void`,有設時縮圖包
+     `<Pressable accessibilityLabel="檢視照片" accessibilityHint="點擊放大查看">`。
+     × 釺跟 onPress 各自獨立 — 不能撞(刪除 vs 檢視不能互撞)。<br>
+  2. 新增 `src/components/PhotoViewer.tsx`:`<Modal transparent fade>` 全黑背景 +
+     `<Image>` (expo-image) `contentFit="contain"` 撐滿。右上 × + 點背景關閉,×
+     用 `useSafeAreaInsets` 避開 notch。`uri: string | null` 控制開關(null 傳入 = 關)。
+     expo-image `cachePolicy="memory-disk"`,重開同一張幾乎零延遲。<br>
+  3. `new.tsx` 加 `viewerUri` state、`[itemId].tsx` 同 + 加 header 那張 220px 大圖也變可點
+     (原本只是裝飾圖,現在優先用途變成「總攬」)。<br>
+  **為什麼不做 pinch-to-zoom**:MVP 需求是「看清楚」,1:1 已經比 80×80 縮圖大 10×+,
+  expo-image 的 contain 不裁切保留完整標籤。reanimated 4 + gesture-handler 4 的
+  pinch worklet ~80 行,有需要時再加(以「使用者反映看不到小字」為升級訊號)。
+  測試:`__tests__/PhotoGrid.test.tsx` 鎖住三條路徑(有 onPress / 沒 onPress / 空 photos),
+  fireEvent 要包 act() 才能讓 RN 的 useState 完成(不包下一個 render 接到上輪未清的 act()
+  會 tree miss)。`test-utils/render.tsx` 包 SafeAreaProvider 因 PhotoViewer 用
+  `useSafeAreaInsets` 需 Provider。
 - **2025-09-07 — OCR 改自架 PaddleOCR(換掉 Gemini Flash)。** Gemini flash-latest
   免費 tier 的 503 退不掉,連上指數退避 (1/2/4/8s × 5) 還是會全失敗(看 .1 上 3 發
   連續 503 期間的 stack)。原因是免費 GCP 區域性 load-shedding + 我們一個 app 直接打
