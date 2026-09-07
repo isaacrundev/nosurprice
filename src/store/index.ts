@@ -86,7 +86,27 @@ export const useStore = create<State>((set, get) => ({
         const item = rowToItem(r);
         (itemsBySession[item.sessionId] ??= []).push(item);
       }
-      set({ sessions, itemsBySession, isReady: true });
+
+      // 清掉沒有 items 的空 session:detail 的 auto-delete 只在 unmount 時跑,
+      // force-quit / crash / 沒走完 detail 的流程會留孤兒在 db,冷啟動顯示為幽靈採買。
+      // ponytail: 用 IN 一發 DELETE 取代 for-loop 的 N 個 runAsync。Web OPFS 一個
+      // file 同時只允許一個 sync access handle,N 次寫入幾乎一定會撞到 NoModificationAllowed
+      // (`github.com/expo/expo/issues/36835, 49450`)。單一 statement 也比較省 round-trip。
+      const emptyIds = sessions
+        .filter((s) => !(itemsBySession[s.id]?.length))
+        .map((s) => s.id);
+      if (emptyIds.length > 0) {
+        const placeholders = emptyIds.map(() => '?').join(',');
+        await db.runAsync(
+          `DELETE FROM sessions WHERE id IN (${placeholders})`,
+          emptyIds,
+        );
+      }
+      const cleanedSessions = emptyIds.length
+        ? sessions.filter((s) => !emptyIds.includes(s.id))
+        : sessions;
+
+      set({ sessions: cleanedSessions, itemsBySession, isReady: true });
     } catch (err) {
       // 失敗也要翻 isReady,spinner 才不會卡住;真實錯誤從 console 撈
       console.error('[hydrate] failed:', err);

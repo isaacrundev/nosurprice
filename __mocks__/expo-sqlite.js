@@ -50,12 +50,28 @@ function runAsync(sql, params = []) {
   }
 
   if (/^DELETE FROM/i.test(sql)) {
-    const whereCol = sql.match(/WHERE\s+(\w+)/i)[1];
+    const whereMatch = sql.match(/WHERE\s+(\w+)\s+(.+)$/i);
+    if (!whereMatch) throw new Error(`runAsync DELETE 需要 WHERE: ${sql}`);
+    const whereCol = whereMatch[1];
+    const whereRest = whereMatch[2].trim();
     const rows = rowsFor(table);
-    const kept = rows.filter((r) => r[whereCol] !== params[0]);
-    const removed = rows.length - kept.length;
-    TABLES.set(table, kept);
-    return Promise.resolve({ changes: removed });
+
+    if (/^=\s*\?$/i.test(whereRest)) {
+      // WHERE col = ? — single value
+      const kept = rows.filter((r) => r[whereCol] !== params[0]);
+      const removed = rows.length - kept.length;
+      TABLES.set(table, kept);
+      return Promise.resolve({ changes: removed });
+    }
+    if (/^IN\s*\((?:\s*\?,?\s*)+\)$/i.test(whereRest)) {
+      // WHERE col IN (?, ?, ...) — batch delete(hydrate 清幽靈採買用)
+      const inValues = params;
+      const kept = rows.filter((r) => !inValues.includes(r[whereCol]));
+      const removed = rows.length - kept.length;
+      TABLES.set(table, kept);
+      return Promise.resolve({ changes: removed });
+    }
+    throw new Error(`runAsync 不支援 WHERE: ${whereRest}`);
   }
 
   if (/^UPDATE/i.test(sql)) {

@@ -31,6 +31,7 @@ type FormValues = {
 const EMPTY: FormValues = { name: '', price: '', note: '' };
 
 type Target = 'label' | 'extra';
+type Step = 'label' | 'form';
 
 export default function ItemNewScreen() {
   const { id: sessionId } = useLocalSearchParams<{ id: string }>();
@@ -41,6 +42,9 @@ export default function ItemNewScreen() {
     defaultValues: EMPTY,
   });
 
+  // 兩步驟流程:先上傳標籤照(label)才能進表單(form)。
+  // 上傳 ≥1 張後才顯示「下一步」按鈕,使用者可一次傳多張再手動推進。
+  const [step, setStep] = useState<Step>('label');
   const [labelPhotos, setLabelPhotos] = useState<string[]>([]);
   const [extraPhotos, setExtraPhotos] = useState<string[]>([]);
   // 正在挑 / 儲存中的 section;null 表示閒置。驅動 PhotoGrid 顯示 spinner
@@ -77,6 +81,7 @@ export default function ItemNewScreen() {
     }
   }, []);
 
+  const canContinue = labelPhotos.length >= 1;
   const canSave = labelPhotos.length >= 1;
 
   const handleOcr = useCallback(async () => {
@@ -131,6 +136,44 @@ export default function ItemNewScreen() {
     router.back();
   });
 
+  // 第 1 步:上傳標籤照。沒標籤不能進表單。
+  if (step === 'label') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Stack.Screen options={{ title: '新增商品' }} />
+        <View style={styles.stepIntro}>
+          <Text style={styles.stepKicker}>第 1 步 / 共 2 步</Text>
+          <Text style={styles.stepTitle}>先拍標籤照</Text>
+          <Text style={styles.stepDesc}>
+            標籤照是辨識價格、留下紀錄的依據。請先拍或選至少 1 張再填其他資料。
+          </Text>
+        </View>
+        <View style={styles.labelGridWrap}>
+          <PhotoGrid
+            photos={labelPhotos}
+            onAdd={() => handleCapture('label')}
+            onRemove={(idx) => handleRemove('label', idx)}
+            loading={pickingFor === 'label'}
+          />
+        </View>
+        <View style={styles.footer}>
+          {canContinue && (
+            <Pressable
+              onPress={() => setStep('form')}
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                pressed && styles.primaryBtnPressed,
+              ]}
+            >
+              <Text style={styles.primaryBtnText}>下一步</Text>
+            </Pressable>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // 第 2 步:填寫表單(沿用既有 layout)。
   return (
     <SafeAreaView style={styles.container}>
       <Stack.Screen options={{ title: '新增商品' }} />
@@ -242,12 +285,12 @@ export default function ItemNewScreen() {
             onPress={onSave}
             disabled={!canSave}
             style={({ pressed }) => [
-              styles.saveBtn,
-              !canSave && styles.saveBtnDisabled,
-              pressed && canSave && styles.saveBtnPressed,
+              styles.primaryBtn,
+              !canSave && styles.primaryBtnDisabled,
+              pressed && canSave && styles.primaryBtnPressed,
             ]}
           >
-            <Text style={styles.saveBtnText}>
+            <Text style={styles.primaryBtnText}>
               {canSave ? '儲存' : '需先拍標籤照'}
             </Text>
           </Pressable>
@@ -280,6 +323,16 @@ function Field({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   kav: { flex: 1 },
+
+  // step 1 排版
+  stepIntro: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 8, gap: 6 },
+  stepKicker: { fontSize: 12, color: '#208AEF', fontWeight: '600', letterSpacing: 0.5 },
+  stepTitle: { fontSize: 22, fontWeight: '700', color: '#222' },
+  stepDesc: { fontSize: 14, color: '#555', lineHeight: 20 },
+  // flex:1 把 footer 壓到底,符合「Bottom button」PRD 語意
+  labelGridWrap: { flex: 1, paddingHorizontal: 20, paddingTop: 12 },
+
+  // step 2 表單排版
   content: { padding: 16, gap: 16 },
   field: { gap: 6 },
   label: { fontSize: 13, color: '#444', fontWeight: '500' },
@@ -297,21 +350,24 @@ const styles = StyleSheet.create({
   photoSection: { gap: 8, marginTop: 8 },
   photoLabel: { fontSize: 13, color: '#444', fontWeight: '500' },
   photoHint: { fontSize: 11, color: '#888', fontWeight: '400' },
+
+  // 共用 footer + primary button(step 1「繼續填寫」、step 2「儲存」共用)
   footer: {
     padding: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#ccc',
     backgroundColor: '#fff',
   },
-  saveBtn: {
+  primaryBtn: {
     backgroundColor: '#208AEF',
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  saveBtnPressed: { opacity: 0.7 },
-  saveBtnDisabled: { backgroundColor: '#aaa' },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  primaryBtnPressed: { opacity: 0.7 },
+  primaryBtnDisabled: { backgroundColor: '#aaa' },
+  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+
   ocrBtn: {
     flexDirection: 'row',
     alignItems: 'center',

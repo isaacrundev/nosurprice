@@ -65,6 +65,35 @@ describe('useStore — sessions', () => {
   });
 });
 
+describe('useStore — hydrate 清空 session', () => {
+  it('hydrate 會清掉沒有 items 的空 session(幽靈採買)', async () => {
+    // 模擬上次沒清乾淨:塞一個空 session + 一個有 items 的 session
+    await __db.runAsync(
+      'INSERT INTO sessions (id, createdAt, storeName) VALUES (?, ?, ?)',
+      ['ghost-1', new Date().toISOString(), '幽靈採買'],
+    );
+    await __db.runAsync(
+      'INSERT INTO sessions (id, createdAt, storeName) VALUES (?, ?, ?)',
+      ['real-1', new Date().toISOString(), '真採買'],
+    );
+    await __db.runAsync(
+      'INSERT INTO items (id, sessionId, name, expectedPrice, labelPhotos, extraPhotos, note, capturedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      ['item-1', 'real-1', '蘋果', null, '[]', '[]', null, new Date().toISOString()],
+    );
+
+    await useStore.getState().hydrate();
+
+    const sessions = useStore.getState().sessions;
+    expect(sessions.find((s) => s.id === 'ghost-1')).toBeUndefined();
+    expect(sessions.find((s) => s.id === 'real-1')).toBeDefined();
+
+    // db 也要清掉,別留垃圾資料
+    const dbSessions = __db.__tables().get('sessions') as Array<{ id: string }>;
+    expect(dbSessions.find((s) => s.id === 'ghost-1')).toBeUndefined();
+    expect(dbSessions.find((s) => s.id === 'real-1')).toBeDefined();
+  });
+});
+
 describe('useStore — items', () => {
   let sessionId: string;
   beforeEach(async () => {
