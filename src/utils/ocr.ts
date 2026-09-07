@@ -1,85 +1,93 @@
 import { Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
 
 // ⚠️ MVP-only: key 從 .env.local 進 client bundle(EXPO_PUBLIC_* Metro 會自動內嵌)。
-// APK 仍能反組譯拿到,只是不進 git history。上 production 一定要搬後端 proxy。
-const OCR_API_KEY = process.env.EXPO_PUBLIC_OCR_API_KEY;
-const OCR_ENDPOINT = 'https://api.ocr.space/parse/image';
-// ponytail: language=cht 是繁體中文(Taiwan 標籤);OCREngine=2 對中文辨識率較好。
+// APK 仍能反組組拿到,只是不進 git history。上 production 一定要搬後端 proxy。
+//
+// ⚠️ PADDLEOCR_URL 是 Cloudflare trycloudflare.com 免費 tunnel,每次重啟 tunnel
+// subdomain 會換;WSL / 網路掛掉時整支會死。每次 deploy 後必須更新這個 env。
+// 若要走 stable URL → 註冊 domain + 設 Cloudflare named Tunnel。
+const PADDLEOCR_URL = process.env.EXPO_PUBLIC_PADDLEOCR_URL;
+const PADDLEOCR_API_KEY = process.env.EXPO_PUBLIC_PADDLEOCR_API_KEY;
+// Server 目前只載 chinese_cht(看 /health)。其他 lang 會 422。
+const PADDLEOCR_LANG = process.env.EXPO_PUBLIC_PADDLEOCR_LANG ?? 'chinese_cht';
 
-function requireApiKey(): string {
-  if (!OCR_API_KEY) {
+function requireConfig(): { url: string; apiKey: string } {
+  if (!PADDLEOCR_URL || !PADDLEOCR_API_KEY) {
     throw new Error(
-      'EXPO_PUBLIC_OCR_API_KEY 未設定。請在 .env.local 加上 EXPO_PUBLIC_OCR_API_KEY=<你的 OCR.space key>',
+      'OCR 設定未完成。請在 .env.local 加上 EXPO_PUBLIC_PADDLEOCR_URL + EXPO_PUBLIC_PADDLEOCR_API_KEY',
     );
   }
-  return OCR_API_KEY;
+  return { url: PADDLEOCR_URL.replace(/\/$/, ''), apiKey: PADDLEOCR_API_KEY };
 }
 
-async function uriToDataUrl(uri: string): Promise<string> {
+interface PaddleOCRResponse {
+  lang?: string;
+  texts?: string[];
+  scores?: number[];
+  boxes?: number[][];
+}
+
+async function buildFormData(uri: string): Promise<FormData> {
+  const form = new FormData();
   if (Platform.OS === 'web') {
+    // expo-image-picker 在 web 上回 blob:http://... — fetch 拿 Blob 再 append。
     const blob = await fetch(uri).then((r) => r.blob());
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error('FileReader 失敗'));
-      reader.readAsDataURL(blob);
-    });
+    form.append('file', blob, 'photo.jpg');
+  } else {
+    // RN native:FormData 接受 {uri, name, type},fetch 內部讀檔上傳。
+    const isPng = uri.toLowerCase().includes('.png');
+    form.append('file', {
+      uri,
+      name: isPng ? 'photo.png' : 'photo.jpg',
+      type: isPng ? 'image/png' : 'image/jpeg',
+    } as unknown as Blob);
   }
-  const ext = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-  const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
-  const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-  return `data:${mime};base64,${base64}`;
+  return form;
 }
 
-export async function ocrImage(uri: string): Promise<string> {
-  const apiKey = requireApiKey();
-  const base64Image = await uriToDataUrl(uri);
-  const fetchOpts: RequestInit = {
+async function postOCR(url: string, apiKey: string, uri: string): Promise<Response> {
+  return fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      apikey: apiKey,
-      language: 'cht',
-      isOverlayRequired: false,
-      OCREngine: 2,
-      scale: true,
-      base64Image,
-    }),
-  };
-  // 5xx 是 OCR.space 機房 / 流量問題(免費版常見,論壇有大量抱怨)。
-  // ponytail: 最多試 3 次 / 500ms backoff。退到第 3 次才放棄讓使用者手動重試,
-  // 不做無限退避(失敗要即時回報,不要 spinner 轉 30 秒)。
-  let res = await fetch(OCR_ENDPOINT, fetchOpts);
-  for (let attempt = 0; attempt < 2 && !res.ok && res.status >= 500; attempt++) {
-    await new Promise<void>((r) => setTimeout(r, 500));
-    res = await fetch(OCR_ENDPOINT, fetchOpts);
+    headers: { 'X-API-Key': apiKey },
+    body: await buildFormData(uri),
+  });
+}
+
+async function callPaddleOCR(uri: string): Promise<string[]> {
+  const { url, apiKey } = requireConfig();
+  const endpoint = `${url}/ocr?lang=${encodeURIComponent(PADDLEOCR_LANG)}`;
+
+  let res = await postOCR(endpoint, apiKey, uri);
+  // 5xx / 429 = server 暫時掛 / load shedding(同樣的雲端 load-shed,跟 Gemini 503 一樣情境)。
+  // ponytail: 4 retries × [1, 2, 4, 8]s × ±25% jitter = 最壞 ~17s。
+  // 不無限退避:失敗要即時回報,不要 spinner 轉 1 分鐘。
+  const BACKOFFS_MS = [1000, 2000, 4000, 8000];
+  for (let attempt = 0; attempt < BACKOFFS_MS.length && !res.ok && (res.status >= 500 || res.status === 429); attempt++) {
+    const jitter = BACKOFFS_MS[attempt] * (0.75 + Math.random() * 0.5);
+    await new Promise<void>((r) => setTimeout(r, jitter));
+    res = await postOCR(endpoint, apiKey, uri);
   }
+
   if (!res.ok) {
-    // 5xx 已經 retry 過了還是掛,給中文訊息;4xx 多半是圖的問題,保留 status 方便排查。
-    if (res.status >= 500) {
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('OCR API key 錯誤,請聯絡開發者');
+    }
+    if (res.status === 404) {
+      // 最常見:tunnel 死了 / URL 換了
+      throw new Error('OCR 伺服器找不到,請聯絡開發者');
+    }
+    if (res.status >= 500 || res.status === 429) {
       throw new Error('OCR 服務暫時無法使用,請稍後重試');
     }
     throw new Error(`OCR HTTP ${res.status}`);
   }
-  const json = (await res.json()) as {
-    ParsedResults?: { ParsedText: string }[];
-    IsErroredOnProcessing?: boolean;
-    ErrorMessage?: string;
-    ErrorDetails?: string;
-  };
-  if (json.IsErroredOnProcessing) {
-    // 圖被 OCR.space 判定為損毀 / 無法讀("E502: Corrupted JPEG" 之類)— 對使用者
-    // 沒意義。raw 留 console 給開發者排查。
-    const raw = json.ErrorMessage || json.ErrorDetails || 'OCR 處理失敗';
-    console.warn('[OCR]', raw);
-    throw new Error('OCR 無法辨識這張圖,請手動輸入價格');
-  }
-  return json.ParsedResults?.[0]?.ParsedText ?? '';
+
+  const json = (await res.json()) as PaddleOCRResponse;
+  return Array.isArray(json.texts) ? json.texts : [];
 }
 
 // 從 OCR 文字抽出最可能的價錢;找不到回傳 null。
-// ponytail: 啟發式依序 — 「X 元」> 「NT$/NTD/$ X」> 「特價/優惠 X」> 整段最後一個數字。
+// 啟發式依序:「X 元」> 「NT$/NTD/$ X」> 「特價/優惠 X」> 整段最後一個數字。
 // 退回最後一個數字可能誤判(如「整盒 6 入」),但欄位可編輯,使用者手動修就好。
 export function extractPrice(text: string): number | null {
   const clean = text.replace(/\s+/g, ' ');
@@ -95,4 +103,14 @@ export function extractPrice(text: string): number | null {
     if (last > 0 && last < 100000) return last;
   }
   return null;
+}
+
+// 從標籤照直接抽出價格。把所有 OCR 行 join 起來丟給 extractPrice,
+// 由它的啟發式去挑「X 元」>「NT$」>「特價」>最後一個數字。
+// 為什麼不逐行:逐行會讓「可口可樂 350ml」這種行誤命中(走 last-resort 回 350)。
+// 跨行 join + 優先順序,才能讓 currency marker 贏過裸數字。
+export async function ocrPrice(uri: string): Promise<number | null> {
+  const texts = await callPaddleOCR(uri);
+  if (texts.length === 0) return null;
+  return extractPrice(texts.join(' '));
 }

@@ -2,6 +2,38 @@ form is meaningless (OCR target, dispute evidence, etc.).
 
 ## Decisions log
 
+- **2025-09-07 — OCR 改自架 PaddleOCR(換掉 Gemini Flash)。** Gemini flash-latest
+  免費 tier 的 503 退不掉,連上指數退避 (1/2/4/8s × 5) 還是會全失敗(看 .1 上 3 發
+  連續 503 期間的 stack)。原因是免費 GCP 區域性 load-shedding + 我們一個 app 直接打
+  `generativelanguage.googleapis.com`,沒有 quota buffer。改用自架的 PaddleOCR FastAPI
+  server(託在 Cloudflare trycloudflare tunnel),`POST /ocr` multipart upload + `X-API-Key`
+  header,只做 OCR 拿回 `texts[]` 字串陣列,再由前端 `extractPrice` 跑啟發式抽數字。
+  代價:Gemini 一發 API 同時做 vision + extraction,現在要自己寫 regex(舊的拿回來)。
+  環境變數 `EXPO_PUBLIC_GEMINI_API_KEY` → `EXPO_PUBLIC_PADDLEOCR_URL` +
+  `EXPO_PUBLIC_PADDLEOCR_API_KEY`(+ 可選 `EXPO_PUBLIC_PADDLEOCR_LANG` default
+  `chinese_cht`)。Retry 退避不變(同樣的 load-shedding 模式,PaddleOCR 也會跳)。
+  **可靠性提醒**:trycloudflare tunnel 每次重啟 subdomain 會換、tunnel / WSL / 網路掛了
+  整支會死,所以:
+  - 404 → 「OCR 伺服器找不到,請聯絡開發者」(幾乎一定是 URL 換了 / tunnel 死了)
+  - 401/403 → 「OCR API key 錯誤,請聯絡開發者」
+  - 100% stable URL → 註冊 domain + 設 Cloudflare named Tunnel
+- **2025-09-07 — Gemini OCR retry 改指數退避。** 原 retry 寫 `500ms × 2`
+  (3 次),使用者實測連收 3 個 503 — Gemini 503 訊息自承 "Spikes in demand are usually
+  temporary" 但實測要 5–10s 才退,500ms 等於送死。改 `[1, 2, 4, 8]s` 指數退避 + ±25%
+  jitter,5 次嘗試後才放棄(最壞 ~17s 等 + 5 次 API call)。`new.tsx` / `[itemId].tsx`
+  不動,「辨識中...」spinner 自然展延。退避底線沒拉更長(不無限退避)因為失敗要即時
+  回報 — 讓使用者立刻看到錯誤重試,而不是 spinner 轉 1 分鐘。
+- **2025-09-07 — OCR 換成 Gemini Flash vision。** `src/utils/ocr.ts` 原本走
+  `api.ocr.space/parse/image`(OCREngine=2 + cht),免費 tier 機房長期不穩
+  (`forum.ui.vision` 有大量 502/503 抱怨,「retry 3 次」只是治標)。改用
+  `generativelanguage.googleapis.com` 的 `gemini-flash-latest`(目前 alias 到
+  3.8-flash),一發 API 同時做 vision + price extraction,JSON mode + temperature 0
+  → 回 `{"price": 199}` 直接吃。同步:`ocrImage(uri)→extractPrice(text)` 兩段
+  收成 `ocrPrice(uri): Promise<number | null>`、`extractPrice` regex 全砍
+  (Gemini 自己會挑價格)、`new.tsx` / `[itemId].tsx` 呼叫端從兩行壓成一行。
+  Retry 邏輯保留(5xx + 429,1+2+4+8s + ±25% jitter,5 次)。環境變數 `EXPO_PUBLIC_OCR_API_KEY` 改名
+  `EXPO_PUBLIC_GEMINI_API_KEY`,取 key `aistudio.google.com/apikey`。模型用
+  `-latest` alias 不寫死版本號,免得幾個月後又 404。
 - **2025-09-07 — OCR 錯誤訊息中文化。** `src/utils/ocr.ts` 原本把 HTTP status / OCR.space
   error code 直接 throw 出去,使用者看到「OCR HTTP 502」或「E502: Corrupted JPEG」這種純
   技術訊息。改:5xx (OCR.space 機房 / 流量問題,免費版常見) → 「OCR 服務暫時無法使用,請稍後

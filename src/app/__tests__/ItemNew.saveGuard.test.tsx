@@ -33,8 +33,7 @@ jest.mock('@/utils/photoStorage', () => ({
 }));
 
 jest.mock('@/utils/ocr', () => ({
-  ocrImage: jest.fn(),
-  extractPrice: jest.fn(),
+  ocrPrice: jest.fn(),
 }));
 
 import ItemNewScreen from '@/app/session/[id]/item/new';

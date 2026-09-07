@@ -19,7 +19,7 @@ import { parsePrice } from '@/types';
 import { pickFromLibrary } from '@/utils/pickPhoto';
 import { persistPhoto } from '@/utils/photoStorage';
 import { confirmDestructive, showAlert } from '@/utils/dialog';
-import { ocrImage, extractPrice } from '@/utils/ocr';
+import { ocrPrice } from '@/utils/ocr';
 import { PhotoGrid } from '@/components/PhotoGrid';
 
 type FormValues = {
@@ -91,8 +91,7 @@ export default function ItemNewScreen() {
     }
     setIsOcring(true);
     try {
-      const text = await ocrImage(labelPhotos[0]);
-      const price = extractPrice(text);
+      const price = await ocrPrice(labelPhotos[0]);
       if (price === null) {
         showAlert('辨識失敗', '從這張圖找不到明顯的價格,請手動輸入');
         return;
