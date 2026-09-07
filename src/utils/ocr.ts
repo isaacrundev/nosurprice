@@ -57,7 +57,15 @@ async function callPaddleOCR(uri: string): Promise<string[]> {
   const { url, apiKey } = requireConfig();
   const endpoint = `${url}/ocr?lang=${encodeURIComponent(PADDLEOCR_LANG)}`;
 
-  let res = await postOCR(endpoint, apiKey, uri);
+  // fetch throw TypeError 在 web 上 = CORS preflight 失敗 / DNS / 連線拒絕。
+  // 不能區分哪一個,但跟「伺服器掛了」是同一類使用者動作:請聯絡開發者。
+  // 在 native (iOS/Android) 不會送 CORS 預檢 → 不會遇到這個。
+  let res: Response;
+  try {
+    res = await postOCR(endpoint, apiKey, uri);
+  } catch {
+    throw new Error('OCR 伺服器無法連線,請檢查網路或聯絡開發者');
+  }
   // 5xx / 429 = server 暫時掛 / load shedding(同樣的雲端 load-shed,跟 Gemini 503 一樣情境)。
   // ponytail: 4 retries × [1, 2, 4, 8]s × ±25% jitter = 最壞 ~17s。
   // 不無限退避:失敗要即時回報,不要 spinner 轉 1 分鐘。

@@ -131,6 +131,16 @@ describe('ocrPrice — 5xx / 429 retry', () => {
     await expect(ocrPrice('file:///fake.jpg')).rejects.toThrow('OCR HTTP 422');
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
+
+  it('fetch throw TypeError(CORS / DNS / 連線拒絕)→ 中文錯誤,不重試', async () => {
+    global.fetch = jest.fn(async () => {
+      throw new TypeError('Failed to fetch');
+    }) as unknown as typeof fetch;
+    jest.resetModules();
+    const { ocrPrice } = require('@/utils/ocr');
+    await expect(ocrPrice('file:///fake.jpg')).rejects.toThrow('OCR 伺服器無法連線');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('ocrPrice — 多行文字處理', () => {

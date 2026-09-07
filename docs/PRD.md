@@ -17,6 +17,13 @@ form is meaningless (OCR target, dispute evidence, etc.).
   - 404 → 「OCR 伺服器找不到,請聯絡開發者」(幾乎一定是 URL 換了 / tunnel 死了)
   - 401/403 → 「OCR API key 錯誤,請聯絡開發者」
   - 100% stable URL → 註冊 domain + 設 Cloudflare named Tunnel
+  - **Web CORS preflight**: FastAPI server 目前沒設 CORS middleware,`OPTIONS /ocr`
+    回 405,POST 沒有 `Access-Control-Allow-Origin` → 瀏覽器預檢不通。native
+    (iOS/Android) fetch 不會送預檢 → 不受影響。修正:server 端加
+    `from fastapi.middleware.cors import CORSMiddleware` + `app.add_middleware(...)`,
+    `allow_origins=["http://localhost:8081"]`(生產再加正式 domain)。client 端 fetch
+    throw TypeError(CORS / DNS / 連線拒絕同現)→ 「OCR 伺服器無法連線,請檢查網路或聯絡
+    開發者」,不做 retry(無 server 不會自己回來)。
 - **2025-09-07 — Gemini OCR retry 改指數退避。** 原 retry 寫 `500ms × 2`
   (3 次),使用者實測連收 3 個 503 — Gemini 503 訊息自承 "Spikes in demand are usually
   temporary" 但實測要 5–10s 才退,500ms 等於送死。改 `[1, 2, 4, 8]s` 指數退避 + ±25%
