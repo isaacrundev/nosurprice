@@ -1,6 +1,12 @@
+import * as Crypto from 'expo-crypto';
 import { create } from 'zustand';
 import { getDb } from '@/db';
 import type { Item, Session } from '@/types';
+
+// ponytail: Hermes 不像瀏覽器有全域 crypto,Web 的 `crypto.randomUUID()` 在 RN 直接報
+// `ReferenceError: Property 'crypto' doesn't exist`。`expo-crypto` 跨平台(web 也吃),
+// API 一致,Expo Go 已預裝,免 native rebuild。
+const randomUUID = (): string => Crypto.randomUUID();
 
 type NewSessionInput = { storeName?: string };
 type NewItemInput = Omit<Item, 'id' | 'capturedAt'>;
@@ -38,6 +44,7 @@ function rowToItem(r: {
   sessionId: string;
   name: string;
   expectedPrice: number | null;
+  quantity: number | null;
   labelPhotos: string;
   extraPhotos: string;
   note: string | null;
@@ -48,6 +55,9 @@ function rowToItem(r: {
     sessionId: r.sessionId,
     name: r.name,
     expectedPrice: r.expectedPrice ?? undefined,
+    // ponytail: 老 DB 行可能沒有 quantity 欄位(SELECT * 拿到 undefined),
+    // 一律 fallback 1 避免「數量欄空白」這種半殘狀態
+    quantity: r.quantity ?? 1,
     labelPhotos: JSON.parse(r.labelPhotos) as string[],
     extraPhotos: JSON.parse(r.extraPhotos) as string[],
     note: r.note ?? undefined,
@@ -74,6 +84,7 @@ export const useStore = create<State>((set, get) => ({
         sessionId: string;
         name: string;
         expectedPrice: number | null;
+        quantity: number | null;
         labelPhotos: string;
         extraPhotos: string;
         note: string | null;
@@ -116,7 +127,7 @@ export const useStore = create<State>((set, get) => ({
 
   createSession: async ({ storeName } = {}) => {
     const db = await getDb();
-    const id = crypto.randomUUID();
+    const id = randomUUID();
     const createdAt = new Date().toISOString();
     await db.runAsync(
       'INSERT INTO sessions (id, createdAt, storeName) VALUES (?, ?, ?)',
@@ -168,17 +179,19 @@ export const useStore = create<State>((set, get) => ({
 
   addItem: async (input) => {
     const db = await getDb();
-    const id = crypto.randomUUID();
+    const id = randomUUID();
     const capturedAt = new Date().toISOString();
+    // ponytail: quantity 直接信任 input,UI 層擋下空 / < 1 / NaN 都會送 1 進來。
     await db.runAsync(
       `INSERT INTO items
-         (id, sessionId, name, expectedPrice, labelPhotos, extraPhotos, note, capturedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, sessionId, name, expectedPrice, quantity, labelPhotos, extraPhotos, note, capturedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         input.sessionId,
         input.name,
         input.expectedPrice ?? null,
+        Math.max(1, Math.round(input.quantity ?? 1)),
         JSON.stringify(input.labelPhotos ?? []),
         JSON.stringify(input.extraPhotos ?? []),
         input.note ?? null,
@@ -190,6 +203,7 @@ export const useStore = create<State>((set, get) => ({
       id,
       labelPhotos: input.labelPhotos ?? [],
       extraPhotos: input.extraPhotos ?? [],
+      quantity: Math.max(1, Math.round(input.quantity ?? 1)),
       capturedAt: new Date(capturedAt),
     };
     set((s) => ({
@@ -212,6 +226,10 @@ export const useStore = create<State>((set, get) => ({
     if (patch.expectedPrice !== undefined) {
       fields.push('expectedPrice = ?');
       values.push(patch.expectedPrice);
+    }
+    if (patch.quantity !== undefined) {
+      fields.push('quantity = ?');
+      values.push(Math.max(1, Math.round(patch.quantity)));
     }
     if (patch.labelPhotos !== undefined) {
       fields.push('labelPhotos = ?');

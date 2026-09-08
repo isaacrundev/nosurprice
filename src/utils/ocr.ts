@@ -113,12 +113,23 @@ export function extractPrice(text: string): number | null {
   return null;
 }
 
-// 從標籤照直接抽出價格。把所有 OCR 行 join 起來丟給 extractPrice,
-// 由它的啟發式去挑「X 元」>「NT$」>「特價」>最後一個數字。
-// 為什麼不逐行:逐行會讓「可口可樂 350ml」這種行誤命中(走 last-resort 回 350)。
-// 跨行 join + 優先順序,才能讓 currency marker 贏過裸數字。
-export async function ocrPrice(uri: string): Promise<number | null> {
+// OCR 一次跑完,同時回傳「原始文字陣列 + 抽出的價格」。
+// 原始文字留給備註欄,讓使用者對著原文自己挑價格 — 自動抽取失準時還有
+// 救濟管道,不用盲目相信 regex 挑到的數字。
+export interface OcrResult {
+  price: number | null;
+  texts: string[];
+}
+
+export async function ocrRecognize(uri: string): Promise<OcrResult> {
   const texts = await callPaddleOCR(uri);
-  if (texts.length === 0) return null;
-  return extractPrice(texts.join(' '));
+  const price = texts.length === 0 ? null : extractPrice(texts.join(' '));
+  return { price, texts };
+}
+
+// 從標籤照直接抽出價格。為什麼不逐行:逐行會讓「可口可樂 350ml」這種行誤命中
+// (走 last-resort 回 350)。跨行 join + 優先順序,才能讓 currency marker 贏過裸數字。
+// 既有契約保留 — 測試 / 外部呼叫不會被打破;新流程請改用 ocrRecognize 拿 texts。
+export async function ocrPrice(uri: string): Promise<number | null> {
+  return (await ocrRecognize(uri)).price;
 }

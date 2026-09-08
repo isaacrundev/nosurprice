@@ -12,9 +12,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
+import { useMemo } from 'react';
 import { useStore } from '@/store';
 import { confirmDestructive } from '@/utils/dialog';
-import { formatPrice } from '@/types';
+import { formatPrice, lineTotal } from '@/types';
 import type { Item } from '@/types';
 
 // ponytail: zustand selector 不能回傳新建的 [] (Object.is 會誤判變動、無限 re-render)。
@@ -104,8 +105,11 @@ export default function ItemList() {
       <FlatList
         data={items}
         keyExtractor={(item) => item.id}
+        // 底部 padding 留給 TotalBar(~64),不然最後一筆會被 bar 蓋住
         contentContainerStyle={
-          items.length === 0 ? styles.emptyContainer : undefined
+          items.length === 0
+            ? styles.emptyContainer
+            : styles.listContent
         }
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -117,6 +121,10 @@ export default function ItemList() {
           <ItemRow item={item} onPress={handleItemTap} />
         )}
       />
+
+      {/* 採買總計:釘底 bar,結帳時一眼就能看到「目前跑多少」。
+          用 useMemo 確保 items 沒變就不重算(items reference 變才重算)。 */}
+      <TotalBar items={items} />
 
       {/* 採買選單 */}
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={closeMenu}>
@@ -192,6 +200,11 @@ export default function ItemList() {
 
 function ItemRow({ item, onPress }: { item: Item; onPress: (item: Item) => void }) {
   const thumbUri = item.labelPhotos[0];
+  // 購物現場要的是「一眼算的出來」 — 把 qty × unit 與小計並排,沒單價就只剩數量,
+  // 完全沒數量的舊資料也不會爆炸。
+  const qty = Math.max(1, Math.round(item.quantity || 1));
+  const subtotal = lineTotal(item);
+  const unit = formatPrice(item.expectedPrice);
   return (
     <Pressable
       onPress={() => onPress(item)}
@@ -204,10 +217,15 @@ function ItemRow({ item, onPress }: { item: Item; onPress: (item: Item) => void 
           <View style={[styles.thumb, styles.thumbPlaceholder]} />
         )}
         <View style={styles.rowMain}>
-          <Text style={styles.rowName} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <Text style={styles.rowPrice}>{formatPrice(item.expectedPrice)}</Text>
+          <View style={styles.rowTextCol}>
+            <Text style={styles.rowName} numberOfLines={1}>
+              {item.name.trim() || '未命名商品'}
+            </Text>
+            <Text style={styles.rowCalc} numberOfLines={1}>
+              {qty} × {unit || '未填單價'}
+            </Text>
+          </View>
+          <Text style={styles.rowTotal}>{formatPrice(subtotal) || '—'}</Text>
         </View>
       </View>
       {item.note?.trim() && (
@@ -216,6 +234,29 @@ function ItemRow({ item, onPress }: { item: Item; onPress: (item: Item) => void 
         </Text>
       )}
     </Pressable>
+  );
+}
+
+// ponytail: 結帳前的「總計」應該永遠看得到 — 釘底 bar,即使空清單也提醒「0 元」確認沒漏。
+function TotalBar({ items }: { items: Item[] }) {
+  // 只在 items reference 變時重算;useMemo 防每 render 都跑 sum
+  const { count, sum } = useMemo(() => {
+    let sum = 0;
+    let count = 0;
+    for (const it of items) {
+      const t = lineTotal(it);
+      if (t != null) sum += t;
+      // 件數算「買的單位數」:qty 為主,沒 qty 算 1 件
+      count += Math.max(1, Math.round(it.quantity || 1));
+    }
+    return { count, sum };
+  }, [items]);
+
+  return (
+    <View style={styles.totalBar}>
+      <Text style={styles.totalBarLabel}>{`採買總計 ${count} 件`}</Text>
+      <Text style={styles.totalBarAmount}>{formatPrice(sum)}</Text>
+    </View>
   );
 }
 
@@ -254,24 +295,55 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 12,
+  },
+  rowTextCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
   },
   rowName: {
-    flex: 1,
     fontSize: 16,
     fontWeight: '600',
-    marginRight: 8,
   },
-  rowPrice: {
-    fontSize: 15,
+  rowCalc: {
+    fontSize: 13,
+    color: '#666',
+  },
+  rowTotal: {
+    fontSize: 17,
     color: '#208AEF',
-    fontWeight: '500',
+    fontWeight: '700',
   },
   rowNote: {
     fontSize: 13,
     color: '#666',
     marginTop: 4,
   },
-  emptyContainer: { flexGrow: 1 },
+
+  // 釘底總計 bar
+  totalBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#fff',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#ccc',
+  },
+  totalBarLabel: {
+    fontSize: 14,
+    color: '#444',
+    fontWeight: '500',
+  },
+  totalBarAmount: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#208AEF',
+  },
+  emptyContainer: { flexGrow: 1, paddingBottom: 64 },
+  listContent: { paddingBottom: 88 },
   empty: {
     flex: 1,
     alignItems: 'center',

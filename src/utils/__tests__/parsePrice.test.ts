@@ -1,4 +1,4 @@
-import { formatPrice, parsePrice } from '@/types';
+import { formatPrice, lineTotal, parsePrice } from '@/types';
 import { extractPrice } from '@/utils/ocr';
 
 describe('parsePrice', () => {
@@ -31,6 +31,25 @@ describe('parsePrice', () => {
     expect(formatPrice(199.6)).toBe('NT$200');
     expect(formatPrice(undefined)).toBe('');
     expect(formatPrice(null)).toBe('');
+  });
+});
+
+describe('lineTotal', () => {
+  it('price × quantity,兩個都給', () => {
+    expect(lineTotal({ expectedPrice: 199, quantity: 3 })).toBe(597);
+  });
+  it('缺 price → undefined(UI 層不顯示金額)', () => {
+    expect(lineTotal({ expectedPrice: undefined, quantity: 3 })).toBeUndefined();
+  });
+  it('缺 quantity 視為 1,不讓缺欄位的商品突然變成 0 元', () => {
+    expect(lineTotal({ expectedPrice: 199, quantity: undefined })).toBe(199);
+    expect(lineTotal({ expectedPrice: 199, quantity: 0 })).toBe(199); // < 1 fallback
+  });
+  it('小數會 round,避免浮點飄掉(單價先 round 一次到底)', () => {
+    // Math.round(199.4) = 199;199 * 3 = 597。不會 trade 到下一輪才 round,避免單價×qty 後的微飄。
+    expect(lineTotal({ expectedPrice: 199.4, quantity: 3 })).toBe(597);
+    // JS Math.round(.5) 是「+∞ 方向」 — 199.5 → 200 × 3 = 600。文件化即可,別誤用。
+    expect(lineTotal({ expectedPrice: 199.5, quantity: 3 })).toBe(600);
   });
 });
 

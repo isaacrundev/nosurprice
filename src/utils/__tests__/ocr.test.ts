@@ -224,3 +224,39 @@ describe('ocrPrice — 多行文字處理', () => {
     expect(await ocrPrice('file:///fake.jpg')).toBe(250);
   });
 });
+
+describe('ocrRecognize — 同時回傳原文 + 價格', () => {
+  // 新增的入口,UI 要拿 texts 丟備註 — 鎖住這條路徑別被悄悄改回單純丟 number
+  it('回傳 { price, texts },兩者同源', async () => {
+    mockFetchSequence([
+      {
+        status: 200,
+        body: {
+          lang: 'chinese_cht',
+          texts: ['可口可樂 350ml', 'NT$199', '產地:台灣'],
+          scores: [0.99, 0.99, 0.99],
+          boxes: [[0, 0, 1, 1]],
+        },
+      },
+    ]);
+    jest.resetModules();
+    const { ocrRecognize } = require('@/utils/ocr');
+    const result = await ocrRecognize('file:///fake.jpg');
+    expect(result.price).toBe(199);
+    expect(result.texts).toEqual(['可口可樂 350ml', 'NT$199', '產地:台灣']);
+  });
+
+  it('完全沒文字 → price 與 texts 都空', async () => {
+    mockFetchSequence([
+      {
+        status: 200,
+        body: { lang: 'chinese_cht', texts: [], scores: [], boxes: [] },
+      },
+    ]);
+    jest.resetModules();
+    const { ocrRecognize } = require('@/utils/ocr');
+    const result = await ocrRecognize('file:///fake.jpg');
+    expect(result.price).toBeNull();
+    expect(result.texts).toEqual([]);
+  });
+});

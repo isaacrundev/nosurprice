@@ -22,6 +22,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       sessionId     TEXT NOT NULL,
       name          TEXT NOT NULL,
       expectedPrice INTEGER,
+      quantity      INTEGER NOT NULL DEFAULT 1,
       labelPhotos   TEXT NOT NULL DEFAULT '[]',
       extraPhotos   TEXT NOT NULL DEFAULT '[]',
       note          TEXT,
@@ -31,6 +32,15 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_items_sessionId ON items(sessionId);
   `);
+
+  // ponytail: 老 DB(沒 quantity 欄位)升級路徑。CREATE TABLE IF NOT EXISTS 對已存在
+  // 的舊表完全不會動,新欄位不會自己長出來。ADD COLUMN 既有 NULL 的列會吃 DEFAULT 1,
+  // 現有資料不會壞。try/catch 包起來:沒舊表的全新安裝會丟「duplicate column」丟了就丟。
+  try {
+    await db.execAsync(`ALTER TABLE items ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;`);
+  } catch {
+    // ignore — fresh install or mock DB
+  }
 }
 
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {

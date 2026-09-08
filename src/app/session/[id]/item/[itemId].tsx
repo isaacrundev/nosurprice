@@ -20,13 +20,14 @@ import { parsePrice } from '@/types';
 import { pickFromLibrary } from '@/utils/pickPhoto';
 import { persistPhoto } from '@/utils/photoStorage';
 import { confirmDestructive, showAlert } from '@/utils/dialog';
-import { ocrPrice } from '@/utils/ocr';
+import { ocrRecognize } from '@/utils/ocr';
 import { PhotoGrid } from '@/components/PhotoGrid';
 import { PhotoViewer } from '@/components/PhotoViewer';
 
 type FormValues = {
   name: string;
   price: string;
+  quantity: string;
   note: string;
 };
 
@@ -44,10 +45,11 @@ export default function ItemDetailScreen() {
   const updateItem = useStore((s) => s.updateItem);
   const deleteItem = useStore((s) => s.deleteItem);
 
-  const { control, handleSubmit, reset, setValue } = useForm<FormValues>({
+  const { control, getValues, handleSubmit, reset, setValue } = useForm<FormValues>({
     defaultValues: {
       name: item?.name ?? '',
       price: item?.expectedPrice != null ? String(item.expectedPrice) : '',
+      quantity: String(item?.quantity ?? 1),
       note: item?.note ?? '',
     },
   });
@@ -72,6 +74,7 @@ export default function ItemDetailScreen() {
     reset({
       name: item.name,
       price: item.expectedPrice != null ? String(item.expectedPrice) : '',
+      quantity: String(item.quantity ?? 1),
       note: item.note ?? '',
     });
   }, [item?.id, reset]);
@@ -114,27 +117,37 @@ export default function ItemDetailScreen() {
     }
     setIsOcring(true);
     try {
-      const price = await ocrPrice(labelPhotos[0]);
-      if (price === null) {
-        showAlert('辨識失敗', '從這張圖找不到明顯的價格,請手動輸入');
-        return;
+      // 自動抽取的價格不準時,把原文丟到備註,使用者對著原文挑正確價格
+      const { price, texts } = await ocrRecognize(labelPhotos[0]);
+      if (price !== null) {
+        setValue('price', String(price));
       }
-      setValue('price', String(price));
-      showAlert('辨識完成', `帶入價格 ${price} 元,請檢查是否正確`);
+      if (texts.length > 0) {
+        const block = `[OCR]\n${texts.join('\n')}`;
+        const current = getValues('note').trim();
+        setValue('note', current ? `${current}\n\n${block}` : block);
+      }
+      if (price !== null) {
+        showAlert('辨識完成', `帶入價格 ${price} 元,完整辨識結果已放備註,請檢查`);
+      } else if (texts.length > 0) {
+        showAlert(
+          'OCR 沒找到明顯價格',
+          `抓到 ${texts.length} 行文字已放備註,請從中挑選正確價格`,
+        );
+      } else {
+        showAlert('辨識失敗', '從這張圖找不到任何文字,請手動輸入');
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : '未知錯誤';
       showAlert('OCR 錯誤', msg);
     } finally {
       setIsOcring(false);
     }
-  }, [labelPhotos, setValue]);
+  }, [labelPhotos, setValue, getValues]);
 
   const onSave = handleSubmit(async (data) => {
+    // 名字空白也照存:使用者可能是先來補數量或價格,字串本身就空。
     const name = data.name.trim();
-    if (!name) {
-      showAlert('請輸入商品名稱');
-      return;
-    }
     const priceText = data.price.trim();
     let expectedPrice: number | undefined;
     if (priceText) {
@@ -145,11 +158,15 @@ export default function ItemDetailScreen() {
       }
       expectedPrice = parsed;
     }
+    const qtyRaw = data.quantity.trim();
+    const qtyParsed = qtyRaw === '' ? NaN : Number(qtyRaw);
+    const quantity = Number.isFinite(qtyParsed) && qtyParsed >= 1 ? Math.round(qtyParsed) : 1;
     const note = data.note.trim() || undefined;
 
     await updateItem(itemId, {
       name,
       expectedPrice,
+      quantity,
       labelPhotos,
       extraPhotos,
       note,
@@ -203,7 +220,7 @@ export default function ItemDetailScreen() {
             </Pressable>
           )}
 
-          <Field label="商品名稱" required>
+          <Field label="商品名稱 (選填)">
             <Controller
               control={control}
               name="name"
@@ -213,9 +230,27 @@ export default function ItemDetailScreen() {
                   value={field.value}
                   onChangeText={field.onChange}
                   onBlur={field.onBlur}
-                  placeholder="例:御飯糰 鮭魚"
+                  placeholder="例:御飯糰 鮭魚(留空也OK)"
                   placeholderTextColor="#a0a0a0"
                   returnKeyType="next"
+                />
+              )}
+            />
+          </Field>
+
+          <Field label="數量">
+            <Controller
+              control={control}
+              name="quantity"
+              render={({ field }) => (
+                <TextInput
+                  style={[styles.input, styles.quantityInput]}
+                  value={field.value}
+                  onChangeText={field.onChange}
+                  onBlur={field.onBlur}
+                  placeholder="1"
+                  placeholderTextColor="#a0a0a0"
+                  keyboardType="number-pad"
                 />
               )}
             />
@@ -377,6 +412,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   multiline: { minHeight: 80, textAlignVertical: 'top' },
+  quantityInput: { width: 100 },
   photoSection: { gap: 8, marginTop: 8 },
   photoLabel: { fontSize: 13, color: '#444', fontWeight: '500' },
   photoHint: { fontSize: 11, color: '#888', fontWeight: '400' },

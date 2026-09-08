@@ -2,6 +2,37 @@ form is meaningless (OCR target, dispute evidence, etc.).
 
 ## Decisions log
 
+- **2025-09-07 — OCR 原文帶到備註。** OCR 自動抽的價格偶爾失準(同張標籤照上「原價 /
+  特價」兩個數字、廣宣字、容量 ml 等裸數字干擾),使用者只看到塞好的 price,根本不知
+  道 regex 挑了哪一行。改:`src/utils/ocr.ts` 加 `ocrRecognize(uri): Promise<{ price,
+  texts }>`,既有的 `ocrPrice` 變 thin wrapper 保留測試契約。`new.tsx` /
+  `[itemId].tsx` 的 handleOcr 改呼叫 ocrRecognize,price 自動帶(原行為) +
+  把原文 `texts.join('\n')` 串成 `[OCR]\n...` 區塊 append 到備註欄(保留使用者原
+  有的備註內容不被覆蓋)。三種結果:抽到價 → 「帶入 X 元,完整辨識結果已放備註,請檢查」;
+  有原文但沒抽到價 → 「抓到 N 行文字已放備註,請從中挑選正確價格」;完全沒文字 → 原
+  「請手動輸入」。跳過:用 LLM 重抽(成本)、讓使用者點原文自動帶回 price 欄(互動成本
+  沒省到多少,文字已經在備註欄可以直接抄)。測試: `ocr.test.ts` 加 2 條 ocrRecognize
+  contract 鎖住 texts 同源輸出;既有 ocrPrice 行為不動。
+- **2025-09-07 — 採買人首頁:名字不卡、數量 × 單價 一眼看到、總計釘底。** 原本
+  「商品名稱 *」卡必填、列表只剩一行「品名 / NT$199」、底下沒加總 — 結帳現場
+  一點都幫不上忙。三個變更:**1. 商品名稱改選填。** 採買人現場常見「先看見標籤
+  才想得起名字」(例如看到一包餅乾、來不及打字)。留空也讓存,列表用「未命名商品」
+  placeholder,使用者隨時進去補。`Item.name` schema 仍 NOT NULL,空字串合法 —
+  不用改 FK 結構,變更成本最低。**2. 加 `quantity` 欄位。** 之前要買 3 個御飯糰
+  得分三筆 item 存,行數爆、照片重複。加 `quantity INTEGER NOT NULL DEFAULT 1`,
+  讓採買人一筆就能表達「買 3 個」並在列表顯示單 × 數。表單是 number-pad,空 / <1 /
+  NaN 一律 fallback 1(後面的計算不能依賴它來撐住)。DB 升級使用
+  `ALTER TABLE ADD COLUMN ... DEFAULT 1` 包在 try/catch — 新裝會在 `CREATE TABLE`
+  裡帶欄位、`try` 跳 duplicate column 老實忽略;舊裝補欄位,既有列都拿到 1。
+  `rowToItem` 讀不到欄位時也 fallback 1(`r.quantity ?? 1`)。**3. 列表兩列:
+  品名 + 「N × NT$X」/ 右側小計;底下釘底 bar 累加採買總計。** 原來只有品名 / 單價
+  的 React Native 表單看不出「這趟會花多少」、「今天累計多少」。ItemRow 改兩列:
+  左 (品名 + 「3 × NT$199」次要樣),右 (小計 = 數量 × 單價,加大加重、選同主色)。
+  全部走 `lineTotal(item)` 集中計算,store / UI / 總計 三層同源。TotalBar 釘底
+  (不是 ListFooter)— 滑再多項目也能看到。「採買總計 4 件 NT$443」這種組合,結帳
+  時一眼就能對上帳。`useMemo` 在 items reference 不變就不重算。
+  **跳過的事:** pin-and-zoom 照片、多幣別切換、QR 條碼加入購物車 — 都不在這次需求內,
+  有訊號再加。
 - **2025-09-07 — 點標籤照縮圖全螢幕檢視。** `PhotoGrid` 原本點縮圖什麼都不會發生
   (只有 × 釺能按),結帳台場景下使用者需要親眼再確認標籤照上的價格。
   加:<br>
@@ -93,6 +124,16 @@ form is meaningless (OCR target, dispute evidence, etc.).
   下次冷啟動 hydrate 讀進 state 後會顯示為幽靈採買。hydrate() 加一段:塞完
   itemsBySession 後,找出空 session 從 db 跟 state 一起刪掉。Detail 頁的 cleanup
   保留(走完正常流程時提供即時刪除的 UX)。
+- **2025-XX-XX — `crypto.randomUUID()` 在 Hermes 不存在,改用 `expo-crypto`。**
+  Android Expo Go 點「新增採買」實機實測報 `ReferenceError: Property 'crypto'
+  doesn't exist`(Web 端沒事 — 瀏覽器有全域 `crypto`)。根因:Hermes engine 沒把 Web
+  Crypto API 當 global 暴露,`crypto` 不是 JS runtime 上的 identifier。
+  修法:加 `expo-crypto`(~57.0.2,Expo Go 已預裝免 rebuild),`src/store/index.ts`
+  的兩處 `crypto.randomUUID()`(createSession / addItem)改走
+  `Crypto.randomUUID()`。Expo 官方 SDK,跨平台一致(Android / iOS / Web),無需
+  platform 分支也不需要 `react-native-get-random-values` polyfill。選這個而不是手寫
+  uuid v4:`expo-crypto` 是 stdlib 等級的官方套件,Expo Go 內建可不裝,新安裝也只要
+  `npx expo install`(版本會被 SDK constraints 鎖對),不用維護自製工具。
 
 ## Conventions
 
