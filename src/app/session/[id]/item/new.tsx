@@ -16,7 +16,7 @@ import { Controller, useForm } from 'react-hook-form';
 
 import { useStore } from '@/store';
 import { parsePrice } from '@/types';
-import { pickFromLibrary } from '@/utils/pickPhoto';
+import { pickPhoto } from '@/utils/pickPhoto';
 import { persistPhoto } from '@/utils/photoStorage';
 import { confirmDestructive, showAlert } from '@/utils/dialog';
 import { ocrRecognize } from '@/utils/ocr';
@@ -57,7 +57,7 @@ export default function ItemNewScreen() {
 
   const handleCapture = useCallback(async (target: Target) => {
     // 開 picker 不用 spinner(同步動作);spinner 只覆蓋 persistPhoto 那段
-    const rawUri = await pickFromLibrary();
+    const rawUri = await pickPhoto();
     if (!rawUri) return;
     setPickingFor(target);
     try {

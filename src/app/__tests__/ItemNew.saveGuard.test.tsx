@@ -27,7 +27,7 @@ jest.mock('@/utils/dialog', () => ({
 }));
 
 jest.mock('@/utils/pickPhoto', () => ({
-  pickFromLibrary: () => mockPick(),
+  pickPhoto: () => mockPick(),
 }));
 
 jest.mock('@/utils/photoStorage', () => ({

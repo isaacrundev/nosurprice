@@ -124,6 +124,19 @@ form is meaningless (OCR target, dispute evidence, etc.).
   下次冷啟動 hydrate 讀進 state 後會顯示為幽靈採買。hydrate() 加一段:塞完
   itemsBySession 後,找出空 session 從 db 跟 state 一起刪掉。Detail 頁的 cleanup
   保留(走完正常流程時提供即時刪除的 UX)。
+- **2026-09-08 — 新增照片:加「從相簿選取」選項。** 原本 `pickFromLibrary()` 命名
+  誤導,實際 native 端只走 `launchCameraAsync`,Android 使用者要傳舊照片標價或查
+  詢明細時得退出手機殼再開相機,流程笨。改:`src/utils/pickPhoto.ts` 拆成內部
+  `takePhoto()` (camera) + `pickFromLibrary()` (實際 library),新增統一入口
+  `pickPhoto()`,native 端先用 `Alert.alert` 跳出「取消 / 從相簿選取 / 拍照」三
+  選一,再走對應 picker;web 端不顯示選擇器直接走 `<input type=file>`。
+  Library picker 加 `ImagePicker.requestMediaLibraryPermissionsAsync()` 守門,
+  Android 13+ 需要 `READ_MEDIA_IMAGES`,Expo ImagePicker 自動處理 config plugin
+  不用手動改 app.json。`mediaTypes: ['images']` 顯式標,避免 SDK 預設變動踩雷。
+  兩個 item 頁面 (`new.tsx` / `[itemId].tsx`) 跟 `ItemNew.saveGuard.test.tsx`
+  的 mock 同步從 `pickFromLibrary` 改 `pickPhoto`。
+  **跳過的事:** 永久顯示兩個獨立按鈕(拍照 / 相簿) — 一個快速選擇器
+  + Alert 就夠了,兩個按鈕擠在 photo grid 旁會讓 add cell 變長。
 - **2025-XX-XX — `crypto.randomUUID()` 在 Hermes 不存在,改用 `expo-crypto`。**
   Android Expo Go 點「新增採買」實機實測報 `ReferenceError: Property 'crypto'
   doesn't exist`(Web 端沒事 — 瀏覽器有全域 `crypto`)。根因:Hermes engine 沒把 Web
