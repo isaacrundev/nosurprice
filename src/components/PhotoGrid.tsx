@@ -15,11 +15,15 @@ type Props = {
   // 跟 onRemove 分開: × 釺是刪除(危險動作),點照片是查看(常見動作),不能撞。
   onPress?: (uri: string) => void;
   loading?: boolean;
+  // 達上限時隱藏「＋」新增磚;省略 = 無上限。
+  maxPhotos?: number;
 };
 
 // 80x80 縮圖網格 + 右下紅 × 刪除 + 虛線藍框 ＋ 新增
 // loading=true 時「＋」變 spinner + disabled,讓使用者知道正在處理
-export function PhotoGrid({ photos, onAdd, onRemove, onPress, loading }: Props) {
+export function PhotoGrid({ photos, onAdd, onRemove, onPress, loading, maxPhotos }: Props) {
+  const atMax = maxPhotos != null && photos.length >= maxPhotos;
+
   return (
     <View style={styles.grid}>
       {photos.map((uri, idx) => (
@@ -48,21 +52,23 @@ export function PhotoGrid({ photos, onAdd, onRemove, onPress, loading }: Props) 
           </Pressable>
         </View>
       ))}
-      <Pressable
-        onPress={onAdd}
-        disabled={loading}
-        style={({ pressed }) => [
-          styles.addTile,
-          pressed && !loading && styles.addTilePressed,
-          loading && styles.addTileLoading,
-        ]}
-      >
-        {loading ? (
-          <ActivityIndicator color="#208AEF" />
-        ) : (
-          <Text style={styles.addTileText}>＋</Text>
-        )}
-      </Pressable>
+      {!atMax && (
+        <Pressable
+          onPress={onAdd}
+          disabled={loading}
+          style={({ pressed }) => [
+            styles.addTile,
+            pressed && !loading && styles.addTilePressed,
+            loading && styles.addTileLoading,
+          ]}
+        >
+          {loading ? (
+            <ActivityIndicator color="#208AEF" />
+          ) : (
+            <Text style={styles.addTileText}>＋</Text>
+          )}
+        </Pressable>
+      )}
     </View>
   );
 }

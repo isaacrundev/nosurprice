@@ -96,9 +96,14 @@ export default function ItemNewScreen() {
     setIsOcring(true);
     try {
       // 自動抽取的價格不準時,把原文丟到備註,使用者對著原文挑正確價格
-      const { price, texts } = await ocrRecognize(labelPhotos[0]);
+      const { price, name, texts } = await ocrRecognize(labelPhotos[0]);
       if (price !== null) {
         setValue('price', String(price));
+      }
+      // ponytail: 品名抽取是純啟發式(看 utils/ocr.ts extractName 的註解),
+      // 只在欄位還是空時帶入 — 使用者已經打的字絕不覆蓋。
+      if (name !== null && getValues('name').trim() === '') {
+        setValue('name', name);
       }
       if (texts.length > 0) {
         const block = `[OCR]\n${texts.join('\n')}`;
@@ -138,8 +143,16 @@ export default function ItemNewScreen() {
       expectedPrice = parsed;
     }
     const qtyRaw = data.quantity.trim();
-    const qtyParsed = qtyRaw === '' ? NaN : Number(qtyRaw);
-    const quantity = Number.isFinite(qtyParsed) && qtyParsed >= 1 ? Math.round(qtyParsed) : 1;
+    if (qtyRaw === '') {
+      showAlert('數量必填', '請填寫數量');
+      return;
+    }
+    const qtyParsed = Number(qtyRaw);
+    if (!Number.isFinite(qtyParsed) || qtyParsed < 1) {
+      showAlert('數量格式不對', '請輸入正整數,例如 1 或 3');
+      return;
+    }
+    const quantity = Math.round(qtyParsed);
     const note = data.note.trim() || undefined;
 
     await addItem({
@@ -174,6 +187,7 @@ export default function ItemNewScreen() {
             onRemove={(idx) => handleRemove('label', idx)}
             onPress={setViewerUri}
             loading={pickingFor === 'label'}
+            maxPhotos={1}
           />
         </View>
         <View style={styles.footer}>
@@ -221,7 +235,7 @@ export default function ItemNewScreen() {
             />
           </Field>
 
-          <Field label="數量">
+          <Field label="數量" required>
             <Controller
               control={control}
               name="quantity"
@@ -298,7 +312,7 @@ export default function ItemNewScreen() {
           <View style={styles.photoSection}>
             <Text style={styles.photoLabel}>
               標籤照 <Text style={styles.required}>*</Text>
-              <Text style={styles.photoHint}> 至少 1 張,§8.1 擋存</Text>
+              <Text style={styles.photoHint}> 點圖重新上傳</Text>
             </Text>
             <PhotoGrid
               photos={labelPhotos}
@@ -306,6 +320,7 @@ export default function ItemNewScreen() {
               onRemove={(idx) => handleRemove('label', idx)}
               onPress={setViewerUri}
               loading={pickingFor === 'label'}
+              maxPhotos={1}
             />
           </View>
 

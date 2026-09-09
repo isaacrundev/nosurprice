@@ -118,9 +118,14 @@ export default function ItemDetailScreen() {
     setIsOcring(true);
     try {
       // 自動抽取的價格不準時,把原文丟到備註,使用者對著原文挑正確價格
-      const { price, texts } = await ocrRecognize(labelPhotos[0]);
+      const { price, name, texts } = await ocrRecognize(labelPhotos[0]);
       if (price !== null) {
         setValue('price', String(price));
+      }
+      // ponytail: 品名抽取是純啟發式(看 utils/ocr.ts extractName 的註解),
+      // 只在欄位還是空時帶入 — 使用者已經打的字絕不覆蓋。
+      if (name !== null && getValues('name').trim() === '') {
+        setValue('name', name);
       }
       if (texts.length > 0) {
         const block = `[OCR]\n${texts.join('\n')}`;

@@ -94,6 +94,33 @@ async function callPaddleOCR(uri: string): Promise<string[]> {
   return Array.isArray(json.texts) ? json.texts : [];
 }
 
+// 從 OCR 一行一行文字裡挑最像品名的候選;找不到回傳 null。
+// ponytail: 純啟發式,沒有 LLM / layout 分析。預期 ~75% 命中常見台灣標籤
+// (品名在上半 + 中文 + 沒價格/容量/規格關鍵字),怪 label (全英文、品名混
+// 在成分表、橫排變直排順序亂) 會誤抓 — 失敗就讓欄位空,使用者打字覆蓋。
+// 升級路徑:把 texts 丟 Gemini Flash 問「哪行是品名?」,成本 ~1s + 額外 API key。
+const NAME_HAS_CJK = /[\u4e00-\u9fff]/;
+// 純容量 / 純數字 (例:「350ml」「6 入」「100g」「1.5L」) 直接略過。
+const NAME_CAPACITY_ONLY = /^[\d\s.,mlMgGkK入個片包罐瓶條袋組]+$/i;
+// 價格 / 促銷 / 規格關鍵字 — 這些行幾乎不會是品名。
+const NAME_NOISE_PATTERNS: RegExp[] = [
+  /NT\$|NTD\b|\$/i,
+  /(?:特價|優惠|促銷|限時|活動價|原價|建議售價)/,
+  /(?:產地|製造|保存|有效|期限|成分|容量|重量|淨重|規格|數量|條碼|進口|代理商)/,
+];
+
+export function extractName(texts: string[]): string | null {
+  for (const raw of texts) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (!NAME_HAS_CJK.test(line)) continue;
+    if (NAME_CAPACITY_ONLY.test(line)) continue;
+    if (NAME_NOISE_PATTERNS.some((p) => p.test(line))) continue;
+    return line;
+  }
+  return null;
+}
+
 // 從 OCR 文字抽出最可能的價錢;找不到回傳 null。
 // 啟發式依序:「X 元」> 「NT$/NTD/$ X」> 「特價/優惠 X」> 整段最後一個數字。
 // 退回最後一個數字可能誤判(如「整盒 6 入」),但欄位可編輯,使用者手動修就好。
@@ -113,18 +140,24 @@ export function extractPrice(text: string): number | null {
   return null;
 }
 
-// OCR 一次跑完,同時回傳「原始文字陣列 + 抽出的價格」。
+// OCR 一次跑完,同時回傳「原始文字陣列 + 抽出的價格 + 抽出的品名」。
 // 原始文字留給備註欄,讓使用者對著原文自己挑價格 — 自動抽取失準時還有
 // 救濟管道,不用盲目相信 regex 挑到的數字。
 export interface OcrResult {
   price: number | null;
+  name: string | null;
   texts: string[];
 }
 
 export async function ocrRecognize(uri: string): Promise<OcrResult> {
   const texts = await callPaddleOCR(uri);
-  const price = texts.length === 0 ? null : extractPrice(texts.join(' '));
-  return { price, texts };
+  if (texts.length === 0) return { price: null, name: null, texts: [] };
+  const joined = texts.join(' ');
+  return {
+    price: extractPrice(joined),
+    name: extractName(texts),
+    texts,
+  };
 }
 
 // 從標籤照直接抽出價格。為什麼不逐行:逐行會讓「可口可樂 350ml」這種行誤命中

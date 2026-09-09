@@ -2,6 +2,40 @@ form is meaningless (OCR target, dispute evidence, etc.).
 
 ## Decisions log
 
+- **2026-09-09 — PhotoViewer 收合時 blur DOM 焦點,消除 `Blocked aria-hidden on an element because its descendant retained focus` 警告。** 在 `item/new` 開標籤照全螢幕檢視,點 × 或背景關閉後,Modal 內的 ×/背景 `<Pressable>` 仍持有 DOM 焦點;RNW Modal 收合用 `display:none + aria-hidden=true`,瀏覽器擋 aria-hidden 不讓聚焦子孫藏在 a11y tree 外 — console 連跳 2 條(`item/new:1` + session 路徑),焦點元素都是關閉按鈕(36×36 Pressable)。修法:`src/components/PhotoViewer.tsx` 加 `blurActive()` helper(`document.activeElement?.blur()`),兩個關閉入口都改成先 blur 再叫 `onClose`。跳過:web 端 Escape 鍵關 Modal(RNW Modal 不原生處理,需 `useEffect` 監 `keydown`,目前沒人報);開啟時把焦點 restore 回觸發的縮圖(`onPress` 已 setState 就把 Modal 開起來,連續 tap 行為沒問題,不值得加 focus restoration)。
+- **2026-XX-XX — 新增商品表單:數量必填、標籤照限一張、灰字備註改為「點圖重新上傳」。**
+  三個 UI 小改:`src/app/session/[id]/item/new.tsx` + `src/components/PhotoGrid.tsx`。
+  **1. 數量必填。** 原 `onSave` 對空數量默默 fallback 1(配合 DEFAULT 1 DB 欄位),
+  但使用者清空欄位後按儲存會以為存了「1 件」實際上根本沒輸入 — 表單層該擋。
+  Field 加 `required` 顯示紅 `*` 標記,`onSave` 改成空字串 / 非數字 / <1 直接
+  `showAlert` 退出,不再靜默 fallback。**2. 標籤照上限一張。** `PhotoGrid` 加
+  `maxPhotos?: number` 選用 prop,達上限時隱藏「＋」新增磚(刪 × 仍可用)。
+  `new.tsx` step 1 / step 2 的標籤照 grid 都帶 `maxPhotos={1}`,上傳到 1 張
+  後想換新照得先 × 刪除,「＋」才會再出現 — 物理上擋住第二張。`[itemId].tsx`
+  編輯頁不改(使用者沒要求,既有資料可能已有 >1 張不要破壞)。**3. 灰字
+  備註 ` 至少 1 張,§8.1 擋存` 改成 ` 點圖重新上傳`。** 配合「只能一張」,
+  備註本來的「至少 1 張」沒意義了,新的文案指示重新上傳的入口(× 刪後 ＋ 出現)。
+  跳過的事:`onPress` 改成「點圖 = 重新上傳」直接覆蓋原本的全螢幕檢視 —
+  兩種 affordance 都留著(× 刪除、點圖檢視),重傳走 × → ＋ 兩步,文案點醒使用者
+  即可。**測試:** `PhotoGrid.test.tsx` 不傳 `maxPhotos` 維持原有行為(無 cap),
+  4 條路徑不變;`ItemNew.saveGuard.test.tsx` 只上傳 1 張,`maxPhotos={1}` 不破壞。
+  新增 1 條 `ItemNew.quantityRequired.test.tsx` 鎖住空數量 → alert + 不 addItem,
+  配合 onSave 雙 guard(空 / 非正整數)確保未來 refactor 不會默默 fallback。
+- **2026-XX-XX — OCR Android Expo Go 連線失敗:`EXPO_PUBLIC_USE_RN_FETCH=1`。
+  實機跑標籤照 OCR,點「辨識價格」直接被通用 catch 吃掉顯示「OCR 伺服器無法連線」。
+  `curl` 從外部打 server 正常(200 + 正常 JSON),URL / API key / 網路都沒事。
+  根因:Expo SDK 57 預設把 `expo/fetch`(WinterCG)裝成 global fetch,但
+  `node_modules/expo/src/winter/fetch/convertFormData.ts:77` 對 React Native 那種
+  `{uri, name, type}` FormData shape 直接 throw `'Unsupported FormDataPart implementation'`。
+  `ocr.ts` 的 native branch 就是這樣 append,Android 一發就 throw,iOS 沒事是因為
+  之前一直走 RN fetch,SDK 57 才被 expo/fetch 蓋掉。修法:`.env.local` + `.env.example`
+  加 `EXPO_PUBLIC_USE_RN_FETCH=1`,Expo 官方 escape hatch,SDK 57 含 PR #46986 連
+  production build 的 inlining 都修了(`.env.local` gitignore 不會漏出去)。重啟
+  Metro 後 global fetch 退回 RN 內建,FormData path 跟 iOS 一樣。不重寫 OCR 用
+  `expo-file-system` 的 `File.upload()` 是真的更乾淨(沒 FormData 依賴),但 1 行
+  env var 跟 SDK 升級的退路還在,先 lazy 走這條,等 SDK 58 `expo/fetch` 內建 RN
+  FormData 支援(PR #46630)再回來拿掉這個 flag。跳過:錯誤訊息區分 FormData / 連線
+  兩種錯誤 — 修了根因就不需要拆。
 - **2025-09-07 — OCR 原文帶到備註。** OCR 自動抽的價格偶爾失準(同張標籤照上「原價 /
   特價」兩個數字、廣宣字、容量 ml 等裸數字干擾),使用者只看到塞好的 price,根本不知
   道 regex 挑了哪一行。改:`src/utils/ocr.ts` 加 `ocrRecognize(uri): Promise<{ price,
@@ -104,6 +138,11 @@ form is meaningless (OCR target, dispute evidence, etc.).
   撞。改:一個 `DELETE FROM sessions WHERE id IN (?, ?, ...)` 一發送掉。也順便更新
   `__mocks__/expo-sqlite.js` 讓 mock 認得 `IN (?, ?, ...)`(原本只吃 `WHERE col = ?`)。
   single statement 也順手省 round-trip,native 不受影響。
+- **2026-XX-XX — Hydrate 加 in-flight coalesce (Web OPFS)。** 單發 DELETE 不夠:HMR 重
+  eval 後 store 模組重生、舊 instance 的 effect 還沒結束就又被掛一個新 effect,平行兩
+  份 hydrate 還是會撞 `NoModificationAllowedError`。改:模組級 `let hydrateInflight` 把同
+  時間的 hydrate 呼叫收成同一個 promise,finally 清掉讓下一次可重試。native 不受影響。
+  保留原本 try/catch 翻 isReady 的語意,spinner 不會卡。
 - **2025-09-07 — OCR 5xx retry。** 上條只翻錯誤訊息,使用者按下「辨識價格」還是會直接吃 502。
   OCR.space 免費版機房 `forum.ui.vision/t/why-is-free-apis-down-continuously/27797` 有長期
   故障歷史,這是免費層 *本來就會遇到* 的事,不是我們能修的東西。加 retry:5xx 時最多重試 2 次

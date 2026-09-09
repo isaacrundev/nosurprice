@@ -65,64 +65,77 @@ function rowToItem(r: {
   };
 }
 
+// 模組級:web OPFS 平行呼叫 coalesce 用。見 hydrate() 內 ponytail 註解。
+let hydrateInflight: Promise<void> | null = null;
+
 export const useStore = create<State>((set, get) => ({
   sessions: [],
   itemsBySession: {},
   isReady: false,
 
-  hydrate: async () => {
-    try {
-      const db = await getDb();
-      const sRows = await db.getAllAsync<{
-        id: string;
-        createdAt: string;
-        storeName: string | null;
-        note: string | null;
-      }>('SELECT * FROM sessions ORDER BY createdAt DESC');
-      const iRows = await db.getAllAsync<{
-        id: string;
-        sessionId: string;
-        name: string;
-        expectedPrice: number | null;
-        quantity: number | null;
-        labelPhotos: string;
-        extraPhotos: string;
-        note: string | null;
-        capturedAt: string;
-      }>('SELECT * FROM items ORDER BY capturedAt DESC');
+  hydrate: () => {
+    // ponytail: web OPFS 一個 file 同時只准一個 sync access handle,平行呼叫 hydrate
+    // (HMR 重 eval 後 store 重生 + 舊 instance 的 effect 還在跑 / 任何外部觸發)
+    // 會撞 NoModificationAllowedError。in-flight coalesce:同時間只跑一份,後面
+    // 的呼叫直接拿同一個 promise。finally 清掉讓下次重試可跑。
+    if (hydrateInflight) return hydrateInflight;
+    hydrateInflight = (async () => {
+      try {
+        const db = await getDb();
+        const sRows = await db.getAllAsync<{
+          id: string;
+          createdAt: string;
+          storeName: string | null;
+          note: string | null;
+        }>('SELECT * FROM sessions ORDER BY createdAt DESC');
+        const iRows = await db.getAllAsync<{
+          id: string;
+          sessionId: string;
+          name: string;
+          expectedPrice: number | null;
+          quantity: number | null;
+          labelPhotos: string;
+          extraPhotos: string;
+          note: string | null;
+          capturedAt: string;
+        }>('SELECT * FROM items ORDER BY capturedAt DESC');
 
-      const sessions = sRows.map(rowToSession);
-      const itemsBySession: Record<string, Item[]> = {};
-      for (const r of iRows) {
-        const item = rowToItem(r);
-        (itemsBySession[item.sessionId] ??= []).push(item);
+        const sessions = sRows.map(rowToSession);
+        const itemsBySession: Record<string, Item[]> = {};
+        for (const r of iRows) {
+          const item = rowToItem(r);
+          (itemsBySession[item.sessionId] ??= []).push(item);
+        }
+
+        // 清掉沒有 items 的空 session:detail 的 auto-delete 只在 unmount 時跑,
+        // force-quit / crash / 沒走完 detail 的流程會留孤兒在 db,冷啟動顯示為幽靈採買。
+        // ponytail: 用 IN 一發 DELETE 取代 for-loop 的 N 個 runAsync。Web OPFS 一個
+        // file 同時只允許一個 sync access handle,N 次寫入幾乎一定會撞到 NoModificationAllowed
+        // (`github.com/expo/expo/issues/36835, 49450`)。單一 statement 也比較省 round-trip。
+        const emptyIds = sessions
+          .filter((s) => !(itemsBySession[s.id]?.length))
+          .map((s) => s.id);
+        if (emptyIds.length > 0) {
+          const placeholders = emptyIds.map(() => '?').join(',');
+          await db.runAsync(
+            `DELETE FROM sessions WHERE id IN (${placeholders})`,
+            emptyIds,
+          );
+        }
+        const cleanedSessions = emptyIds.length
+          ? sessions.filter((s) => !emptyIds.includes(s.id))
+          : sessions;
+
+        set({ sessions: cleanedSessions, itemsBySession, isReady: true });
+      } catch (err) {
+        // 失敗也要翻 isReady,spinner 才不會卡住;真實錯誤從 console 撈
+        console.error('[hydrate] failed:', err);
+        set({ isReady: true });
+      } finally {
+        hydrateInflight = null;
       }
-
-      // 清掉沒有 items 的空 session:detail 的 auto-delete 只在 unmount 時跑,
-      // force-quit / crash / 沒走完 detail 的流程會留孤兒在 db,冷啟動顯示為幽靈採買。
-      // ponytail: 用 IN 一發 DELETE 取代 for-loop 的 N 個 runAsync。Web OPFS 一個
-      // file 同時只允許一個 sync access handle,N 次寫入幾乎一定會撞到 NoModificationAllowed
-      // (`github.com/expo/expo/issues/36835, 49450`)。單一 statement 也比較省 round-trip。
-      const emptyIds = sessions
-        .filter((s) => !(itemsBySession[s.id]?.length))
-        .map((s) => s.id);
-      if (emptyIds.length > 0) {
-        const placeholders = emptyIds.map(() => '?').join(',');
-        await db.runAsync(
-          `DELETE FROM sessions WHERE id IN (${placeholders})`,
-          emptyIds,
-        );
-      }
-      const cleanedSessions = emptyIds.length
-        ? sessions.filter((s) => !emptyIds.includes(s.id))
-        : sessions;
-
-      set({ sessions: cleanedSessions, itemsBySession, isReady: true });
-    } catch (err) {
-      // 失敗也要翻 isReady,spinner 才不會卡住;真實錯誤從 console 撈
-      console.error('[hydrate] failed:', err);
-      set({ isReady: true });
-    }
+    })();
+    return hydrateInflight;
   },
 
   createSession: async ({ storeName } = {}) => {

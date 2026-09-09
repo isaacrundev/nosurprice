@@ -260,3 +260,56 @@ describe('ocrRecognize — 同時回傳原文 + 價格', () => {
     expect(result.texts).toEqual([]);
   });
 });
+
+describe('extractName — 從 OCR 原文挑品名', () => {
+  let extractName: (texts: string[]) => string | null;
+  beforeEach(() => {
+    jest.resetModules();
+    ({ extractName } = require('@/utils/ocr'));
+  });
+
+  it('常見台灣標籤:品名 + 容量同行、價格/產地另外行 → 取第一個含中文的候選', () => {
+    expect(
+      extractName(['可口可樂 350ml', 'NT$199', '產地:台灣']),
+    ).toBe('可口可樂 350ml');
+  });
+
+  it('跳過價格行 (特價/原價) — 即使整行有中文', () => {
+    expect(
+      extractName(['特價 49 元', '御飯糰 鮭魚', '產地:日本']),
+    ).toBe('御飯糰 鮭魚');
+  });
+
+  it('跳過純容量行 (350ml、6 入) — 中文必備', () => {
+    expect(
+      extractName(['350ml', '御飯糰 鮭魚', 'NT$49']),
+    ).toBe('御飯糰 鮭魚');
+  });
+
+  it('跳過規格/成分/產地行', () => {
+    expect(
+      extractName([
+        '產地:台灣',
+        '成分:水、糖',
+        '保存期限:2025/12/31',
+        '可口可樂',
+      ]),
+    ).toBe('可口可樂');
+  });
+
+  it('只有英文品名 → 跳過(本 app 中文為主)', () => {
+    // 文件化行為: 沒 CJK 就視為不可信,留 null 給使用者手動
+    expect(extractName(['Coca-Cola', 'NT$199'])).toBeNull();
+  });
+
+  it('全部都是價格/規格行 → null,UI 不覆蓋使用者可能已打的空字串', () => {
+    expect(
+      extractName(['NT$199', '特價 89', '產地:台灣', '350ml']),
+    ).toBeNull();
+  });
+
+  it('空陣列 / 全空白 → null', () => {
+    expect(extractName([])).toBeNull();
+    expect(extractName(['', '   ', '\t'])).toBeNull();
+  });
+});

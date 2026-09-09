@@ -2,6 +2,15 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+// ponytail: RNW Modal 用 aria-hidden + display:none 收合,不清掉內部焦點瀏覽器就
+// 擋 aria-hidden 並噴 "Blocked aria-hidden on an element because its descendant retained focus"。
+// 關閉時主動 blur;不必做 focus restoration(開啟時 Modal 不會自動搶焦點)。
+const blurActive = () => {
+  if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+};
+
 type Props = {
   // null = 關閉。有值 = 開啟。
   uri: string | null;
@@ -35,7 +44,7 @@ export function PhotoViewer({ uri, onClose }: Props) {
           cachePolicy="memory-disk"
         />
         <Pressable
-          onPress={onClose}
+          onPress={() => { blurActive(); onClose(); }}
           accessibilityLabel="關閉照片"
           hitSlop={12}
           style={[styles.closeBtn, { top: insets.top + 12, right: 16 }]}
@@ -46,7 +55,7 @@ export function PhotoViewer({ uri, onClose }: Props) {
             (Image 預設不攔事件),所以整片 root 都會跳到這裡。 */}
         <Pressable
           style={StyleSheet.absoluteFill}
-          onPress={onClose}
+          onPress={() => { blurActive(); onClose(); }}
           accessibilityLabel="關閉照片"
         />
       </View>
